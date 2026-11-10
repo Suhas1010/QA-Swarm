@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NovaCart — Tech Gear &amp; Workspace Store</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <a class="brand" href="/" data-route="/">NovaCart</a>
+      <nav class="nav-links">
+        <a href="/" data-route="/">Home</a>
+        <a href="/catalog" data-route="/catalog">Catalog</a>
+        <a href="/cart" data-route="/cart" id="nav-cart-link">Cart (<span id="nav-cart-count">1</span>)</a>
+        <a href="/orders" data-route="/orders">Orders</a>
+        <a href="/profile" data-route="/profile">Profile</a>
+        <a href="/support" data-route="/support">Support</a>
+        <a href="/login" data-route="/login" id="nav-login-link">Login</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app-main" class="container">
+    <p class="muted">Loading NovaCart...</p>
+  </main>
+
+  <div id="quick-view-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="qv-title">Product Details</h3>
+        <button type="button" id="qv-close" class="btn-secondary">Close</button>
+      </div>
+      <div id="qv-body"></div>
+    </div>
+  </div>
+
+  <div id="mobile-promo-banner" class="mobile-promo-banner">
+    <span>Flash Sale: Use code <strong>SAVE50</strong> at Cart!</span>
+  </div>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>&copy; 2026 NovaCart Inc.</span>
+      <div class="footer-links">
+        <a href="/catalog" data-route="/catalog">Shop All</a>
+        <a href="/support" data-route="/support">Help Center</a>
+        <a href="/legal/terms-v2">Terms &amp; Privacy</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

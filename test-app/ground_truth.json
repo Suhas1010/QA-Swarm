@@ -1,0 +1,152 @@
+{
+  "app_name": "NovaCart",
+  "version": "1.0.0",
+  "total_seeded_bugs": 18,
+  "flaky_traps": 3,
+  "bugs": [
+    {
+      "id": "BUG-01",
+      "category": "js_error",
+      "route": "/catalog",
+      "title": "Quick View crashes with TypeError when product metadata is null",
+      "signature_hints": ["pageerror", "typeerror", "specs", "quick view"]
+    },
+    {
+      "id": "BUG-02",
+      "category": "js_error",
+      "route": "/cart",
+      "title": "Setting cart item quantity to 0 or empty throws uncaught RangeError",
+      "signature_hints": ["rangeerror", "quantity", "cart", "nan"]
+    },
+    {
+      "id": "BUG-03",
+      "category": "js_error",
+      "route": "/catalog",
+      "title": "Sort by Highest Rated calls undefined sortByRating function",
+      "signature_hints": ["referenceerror", "sortbyrating", "catalog"]
+    },
+    {
+      "id": "BUG-04",
+      "category": "api_failure",
+      "route": "/cart",
+      "title": "Applying promo code SAVE50 returns HTTP 500 Internal Server Error",
+      "signature_hints": ["500", "/api/coupon", "save50"]
+    },
+    {
+      "id": "BUG-05",
+      "category": "api_failure",
+      "route": "/profile",
+      "title": "Saving profile bio longer than 200 characters returns HTTP 500 instead of 400",
+      "signature_hints": ["500", "/api/profile", "truncation"]
+    },
+    {
+      "id": "BUG-06",
+      "category": "api_failure",
+      "route": "/orders",
+      "title": "Download Invoice button requests /api/orders/invoice/undefined returning 404",
+      "signature_hints": ["404", "/api/orders/invoice/undefined", "invoice"]
+    },
+    {
+      "id": "BUG-07",
+      "category": "validation_hole",
+      "route": "/profile",
+      "title": "Newsletter signup accepts whitespace-only email causing undefined subscriber error",
+      "signature_hints": ["newsletter", "subscriber", "422", "email"]
+    },
+    {
+      "id": "BUG-08",
+      "category": "validation_hole",
+      "route": "/cart",
+      "title": "Cart quantity accepts negative integer producing negative order total",
+      "signature_hints": ["negative", "quantity", "cart", "total"]
+    },
+    {
+      "id": "BUG-09",
+      "category": "validation_hole",
+      "route": "/checkout",
+      "title": "Checkout accepts non-numeric ZIP or expired card and fails silently with HTTP 400",
+      "signature_hints": ["400", "/api/checkout/validate", "checkout"]
+    },
+    {
+      "id": "BUG-10",
+      "category": "layout_break",
+      "route": "/",
+      "title": "Mobile navbar overflows viewport horizontally clipping cart icon",
+      "signature_hints": ["overflow", "scrollwidth", "navbar", "mobile"]
+    },
+    {
+      "id": "BUG-11",
+      "category": "layout_break",
+      "route": "/cart",
+      "title": "Mobile sticky promo banner overlaps Proceed to Checkout button",
+      "signature_hints": ["overlap", "occluded", "checkout", "mobile", "banner"]
+    },
+    {
+      "id": "BUG-12",
+      "category": "layout_break",
+      "route": "/catalog",
+      "title": "Unbroken long product title overflows card container overlapping Add to Cart button",
+      "signature_hints": ["overflow", "overlap", "ultrawide", "card"]
+    },
+    {
+      "id": "BUG-13",
+      "category": "broken_flow",
+      "route": "/checkout",
+      "title": "Double-clicking Place Order triggers duplicate submit error and blank confirmation screen",
+      "signature_hints": ["blank", "409", "500", "/api/orders", "place order"]
+    },
+    {
+      "id": "BUG-14",
+      "category": "broken_flow",
+      "route": "/checkout",
+      "title": "Direct navigation or back-navigation to /checkout?step=2 crashes with missing shipping state",
+      "signature_hints": ["step=2", "shipping", "typeerror", "checkout"]
+    },
+    {
+      "id": "BUG-15",
+      "category": "dead_link",
+      "route": "/legal/terms-v2",
+      "title": "Footer Terms & Privacy link points to non-existent /legal/terms-v2 (404)",
+      "signature_hints": ["404", "/legal/terms-v2", "terms"]
+    },
+    {
+      "id": "BUG-16",
+      "category": "dead_link",
+      "route": "/orders",
+      "title": "Track Package button on orders page is a dead control with no state change",
+      "signature_hints": ["dead_end", "track package", "orders"]
+    },
+    {
+      "id": "BUG-17",
+      "category": "xss",
+      "route": "/catalog",
+      "title": "Catalog search query is reflected unescaped via innerHTML enabling stored/reflected XSS",
+      "signature_hints": ["xss", "search", "catalog"]
+    },
+    {
+      "id": "BUG-18",
+      "category": "xss",
+      "route": "/support",
+      "title": "Support ticket subject renders unescaped HTML executing injected script payload",
+      "signature_hints": ["xss", "support", "ticket"]
+    }
+  ],
+  "traps": [
+    {
+      "id": "TRAP-A",
+      "category": "flaky_console",
+      "description": "14% chance of transient Analytics beacon timeout console.error on home page load"
+    },
+    {
+      "id": "TRAP-B",
+      "category": "flaky_network",
+      "description": "12% chance of transient HTTP 503 on /api/recommendations"
+    },
+    {
+      "id": "TRAP-C",
+      "category": "transient_ui",
+      "description": "Brief 120ms shimmer pulse before settling on catalog"
+    }
+  ]
+}
+

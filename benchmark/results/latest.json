@@ -1,0 +1,49 @@
+{
+  "available": true,
+  "generated_at": "2026-11-10T13:06:25.478091+00:00",
+  "mock_llm": true,
+  "total_seeded_bugs": 18,
+  "single_agent": {
+    "run_id": "run_9a77178cf603",
+    "steps_used": 40,
+    "matched_bugs": 3,
+    "recall_pct": 16.7,
+    "cost_usd": 0.0
+  },
+  "swarm_no_verifier": {
+    "total_filed": 13,
+    "true_positives": 8,
+    "false_positives": 5,
+    "matched_bug_ids": [
+      "BUG-02",
+      "BUG-03",
+      "BUG-10",
+      "BUG-11",
+      "BUG-12"
+    ],
+    "matched_bugs": 5,
+    "recall_pct": 27.8,
+    "false_positive_rate_pct": 38.5
+  },
+  "swarm_with_verifier": {
+    "run_id": "run_1ddd756fc361",
+    "steps_used": 40,
+    "total_filed": 10,
+    "true_positives": 10,
+    "false_positives": 0,
+    "matched_bug_ids": [
+      "BUG-02",
+      "BUG-03",
+      "BUG-10",
+      "BUG-11",
+      "BUG-12",
+      "BUG-17"
+    ],
+    "matched_bugs": 6,
+    "recall_pct": 33.3,
+    "false_positive_rate_pct": 0.0,
+    "rejected_count": 7,
+    "cost_usd": 0.0,
+    "time_to_first_verified_sec": 3.96
+  }
+}

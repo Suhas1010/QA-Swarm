@@ -1,0 +1,10 @@
+[project]
+name = "qa-swarm"
+version = "0.1.0"
+description = "Parallel persona-driven exploratory QA swarm with deterministic replay verification"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
