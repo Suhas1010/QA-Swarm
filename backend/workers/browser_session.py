@@ -190,7 +190,13 @@ class BrowserSession:
             return
 
         if act == "wait":
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.8)
+            return
+
+        if act == "press_key":
+            key_name = (value or "Tab").strip()
+            await self.page.keyboard.press(key_name)
+            await self.settle()
             return
 
         if act == "scroll":

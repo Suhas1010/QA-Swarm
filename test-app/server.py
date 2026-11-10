@@ -87,6 +87,7 @@ def _default_session_state() -> dict[str, Any]:
 
 
 SESSIONS: dict[str, dict[str, Any]] = {}
+_RECS_COUNTER = 0
 
 
 def _get_session_id(qa_session: str | None) -> str:
@@ -171,8 +172,10 @@ async def api_bootstrap(
 
 @app.get("/api/recommendations")
 async def api_recommendations() -> dict[str, Any]:
-    # TRAP-B: 12% transient 503 noise (usually fails 2-of-3 replay)
-    if random.random() < 0.12:
+    global _RECS_COUNTER
+    _RECS_COUNTER += 1
+    # TRAP-B: Transient warm-up 503 every 6th call (caught in swarm exploration, rejected 0-1/3 on replay)
+    if _RECS_COUNTER % 6 == 2:
         raise HTTPException(status_code=503, detail="Recommendation service transient warm-up")
     return {"items": INITIAL_PRODUCTS[:2]}
 

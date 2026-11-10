@@ -1,49 +1,66 @@
 {
   "available": true,
-  "generated_at": "2026-11-10T13:06:25.478091+00:00",
+  "generated_at": "2026-11-10T13:29:13.408481+00:00",
   "mock_llm": true,
   "total_seeded_bugs": 18,
   "single_agent": {
-    "run_id": "run_9a77178cf603",
-    "steps_used": 40,
-    "matched_bugs": 3,
-    "recall_pct": 16.7,
+    "run_id": "run_acdcba21b53b",
+    "steps_used": 75,
+    "matched_bugs": 10,
+    "recall_pct": 55.6,
     "cost_usd": 0.0
   },
   "swarm_no_verifier": {
-    "total_filed": 13,
-    "true_positives": 8,
-    "false_positives": 5,
-    "matched_bug_ids": [
-      "BUG-02",
-      "BUG-03",
-      "BUG-10",
-      "BUG-11",
-      "BUG-12"
-    ],
-    "matched_bugs": 5,
-    "recall_pct": 27.8,
-    "false_positive_rate_pct": 38.5
-  },
-  "swarm_with_verifier": {
-    "run_id": "run_1ddd756fc361",
-    "steps_used": 40,
-    "total_filed": 10,
-    "true_positives": 10,
+    "total_filed": 29,
+    "true_positives": 29,
     "false_positives": 0,
     "matched_bug_ids": [
+      "BUG-01",
       "BUG-02",
       "BUG-03",
+      "BUG-06",
+      "BUG-07",
+      "BUG-08",
+      "BUG-09",
       "BUG-10",
       "BUG-11",
       "BUG-12",
+      "BUG-13",
+      "BUG-14",
+      "BUG-16",
       "BUG-17"
     ],
-    "matched_bugs": 6,
-    "recall_pct": 33.3,
+    "matched_bugs": 14,
+    "recall_pct": 77.8,
+    "false_positive_rate_pct": 0.0
+  },
+  "swarm_with_verifier": {
+    "run_id": "run_f7321ceebfcd",
+    "steps_used": 75,
+    "total_filed": 27,
+    "true_positives": 27,
+    "false_positives": 0,
+    "matched_bug_ids": [
+      "BUG-01",
+      "BUG-02",
+      "BUG-03",
+      "BUG-06",
+      "BUG-07",
+      "BUG-08",
+      "BUG-09",
+      "BUG-10",
+      "BUG-11",
+      "BUG-12",
+      "BUG-13",
+      "BUG-14",
+      "BUG-16",
+      "BUG-17"
+    ],
+    "matched_bugs": 14,
+    "recall_pct": 77.8,
     "false_positive_rate_pct": 0.0,
-    "rejected_count": 7,
+    "rejected_count": 0,
     "cost_usd": 0.0,
-    "time_to_first_verified_sec": 3.96
+    "time_to_first_verified_sec": 4.76
   }
 }

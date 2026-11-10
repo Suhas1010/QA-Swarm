@@ -8,6 +8,7 @@ import {
   FileDown,
   Play,
   RotateCcw,
+  Square,
   X,
   XCircle,
 } from "lucide-react";
@@ -44,7 +45,12 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function App() {
   const [tab, setTab] = useState<"live" | "summary">("live");
-  const [health, setHealth] = useState<{ gemini_configured: boolean; nav_model: string } | null>(null);
+  const [health, setHealth] = useState<{
+    gemini_configured: boolean;
+    github_configured?: boolean;
+    github_default_repo?: string;
+    nav_model: string;
+  } | null>(null);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [benchmarks, setBenchmarks] = useState<BenchmarkResults | null>(null);
@@ -54,6 +60,7 @@ export default function App() {
   const [mode, setMode] = useState<"swarm" | "single">("swarm");
   const [stepsPerWorker, setStepsPerWorker] = useState(8);
   const [githubRepo, setGithubRepo] = useState("");
+  const [githubToken, setGithubToken] = useState("");
   const [selectedPersonas, setSelectedPersonas] = useState<string[]>(DEFAULT_PERSONAS);
   const [mockLlm, setMockLlm] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -69,8 +76,9 @@ export default function App() {
   const [bugReports, setBugReports] = useState<BugReportItem[]>([]);
   const [summary, setSummary] = useState<RunSummary | null>(null);
 
-  // Bug detail modal
+  // Bug detail modal & severity filter
   const [bugDetail, setBugDetail] = useState<BugDetailResponse | null>(null);
+  const [sevFilter, setSevFilter] = useState<string>("All");
   const wsRef = useRef<WebSocket | null>(null);
 
   async function refreshMetadata() {
@@ -180,6 +188,7 @@ export default function App() {
           personas: selectedPersonas,
           steps_per_worker: stepsPerWorker,
           github_repo: githubRepo,
+          github_token: githubToken,
           credentials: credEmail ? { email: credEmail, password: credPassword } : null,
           mock_llm: mockLlm,
         }),
@@ -258,7 +267,12 @@ export default function App() {
           </button>
         </div>
 
-        <div style={{ fontSize: "0.82rem", color: "#94a3b8" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", fontSize: "0.82rem", color: "#94a3b8" }}>
+          {health?.github_configured || githubToken ? (
+            <span className="badge badge-verified">GitHub Filing Ready</span>
+          ) : (
+            <span className="badge badge-detected">GitHub: Markdown Fallback</span>
+          )}
           {health?.gemini_configured ? (
             <span className="badge badge-verified">Gemini: {health.nav_model}</span>
           ) : (
@@ -273,11 +287,11 @@ export default function App() {
           <form onSubmit={handleLaunch}>
             <div className="launcher-grid">
               <div className="field">
-                <label>Target Web App URL</label>
+                <label>Target Web App URL (Local or Staging)</label>
                 <input
                   value={targetUrl}
                   onChange={(e) => setTargetUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:3100"
+                  placeholder="http://localhost:3000 or https://your-app.vercel.app"
                   required
                 />
               </div>
@@ -313,6 +327,19 @@ export default function App() {
                 >
                   <RotateCcw size={14} /> Replay Demo
                 </button>
+                {runMeta?.status === "running" && activeRunId && (
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    style={{ borderColor: "#ef4444", color: "#f87171" }}
+                    onClick={async () => {
+                      await fetch(`/api/runs/${activeRunId}/stop`, { method: "POST" });
+                      loadRunSnapshot(activeRunId);
+                    }}
+                  >
+                    <Square size={13} /> Stop
+                  </button>
+                )}
               </div>
             </div>
 
@@ -400,7 +427,7 @@ export default function App() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gridTemplateColumns: "1fr 1fr 1fr 1fr",
                   gap: "0.75rem",
                   marginTop: "0.75rem",
                   paddingTop: "0.75rem",
@@ -408,11 +435,20 @@ export default function App() {
                 }}
               >
                 <div className="field">
-                  <label>GitHub Repo (owner/repo)</label>
+                  <label>GitHub Repo (owner/repo or URL)</label>
                   <input
                     value={githubRepo}
                     onChange={(e) => setGithubRepo(e.target.value)}
-                    placeholder="suhas/my-app (optional)"
+                    placeholder="https://github.com/user/repo"
+                  />
+                </div>
+                <div className="field">
+                  <label>GitHub Token (or .env GITHUB_TOKEN)</label>
+                  <input
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder={health?.github_configured ? "Configured in .env" : "ghp_... (optional)"}
                   />
                 </div>
                 <div className="field">
@@ -420,7 +456,7 @@ export default function App() {
                   <input
                     value={credEmail}
                     onChange={(e) => setCredEmail(e.target.value)}
-                    placeholder="demo@novacart.test"
+                    placeholder="demo@example.com"
                   />
                 </div>
                 <div className="field">
@@ -607,12 +643,29 @@ export default function App() {
           /* Summary & Benchmark Tab */
           <section style={{ display: "grid", gap: "1rem" }}>
             <div className="panel">
-              <h2 style={{ marginTop: 0 }}>Filed Verified Bug Reports ({bugReports.length})</h2>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
+                <h2 style={{ margin: 0 }}>Filed Verified Bug Reports ({bugReports.length})</h2>
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  {["All", "Critical", "High", "Medium", "Low"].map((sv) => (
+                    <button
+                      key={sv}
+                      type="button"
+                      className={`tab-btn ${sevFilter === sv ? "active" : ""}`}
+                      style={{ padding: "0.25rem 0.65rem", fontSize: "0.78rem" }}
+                      onClick={() => setSevFilter(sv)}
+                    >
+                      {sv}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {bugReports.length === 0 ? (
                 <p style={{ color: "#94a3b8" }}>No verified bug reports filed for the selected run yet.</p>
               ) : (
                 <div style={{ display: "grid", gap: "0.6rem" }}>
-                  {bugReports.map((b) => (
+                  {bugReports
+                    .filter((b) => sevFilter === "All" || b.severity === sevFilter)
+                    .map((b) => (
                     <div
                       key={b.id}
                       className="bug-card"
@@ -792,10 +845,25 @@ export default function App() {
                 <h3 style={{ fontSize: "0.9rem" }}>Reproduction Steps</h3>
                 <ol style={{ paddingLeft: "1.2rem", fontSize: "0.84rem", color: "#cbd5e1" }}>
                   {(bugDetail.suspect?.trace_slice || []).map((st) => (
-                    <li key={st.step_index} style={{ marginBottom: "0.45rem" }}>
-                      <code>{st.action_type}</code>{" "}
-                      {st.input_value ? `(${st.input_value}) ` : ""}
-                      at <span style={{ color: "#38bdf8" }}>{st.url}</span>
+                    <li key={st.step_index} style={{ marginBottom: "0.65rem" }}>
+                      <div>
+                        <code>{st.action_type}</code>{" "}
+                        {st.input_value ? `(${st.input_value}) ` : ""}
+                        at <span style={{ color: "#38bdf8" }}>{st.url}</span>
+                      </div>
+                      {st.screenshot_path && (
+                        <img
+                          src={`/media/${st.screenshot_path}`}
+                          alt={`Step ${st.step_index}`}
+                          style={{
+                            marginTop: "0.35rem",
+                            maxWidth: "240px",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            display: "block",
+                          }}
+                        />
+                      )}
                     </li>
                   ))}
                 </ol>

@@ -9,12 +9,22 @@ import httpx
 from storage.artifacts import ArtifactStore
 
 
+def _normalize_repo_slug(repo: str) -> str:
+    cleaned = repo.strip().rstrip("/")
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    if "github.com/" in cleaned:
+        cleaned = cleaned.split("github.com/", 1)[1]
+    parts = [p for p in cleaned.split("/") if p]
+    return f"{parts[0]}/{parts[1]}" if len(parts) >= 2 else cleaned
+
+
 class GitHubIssueClient:
     """Files verified bugs to GitHub REST API (with branch media upload) or exports Markdown fallback."""
 
     def __init__(self, *, token: str = "", repo: str = "", artifacts: ArtifactStore) -> None:
         self.token = token.strip()
-        self.repo = repo.strip()
+        self.repo = _normalize_repo_slug(repo)
         self.artifacts = artifacts
 
     @property

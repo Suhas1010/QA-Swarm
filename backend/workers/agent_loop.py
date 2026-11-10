@@ -16,6 +16,7 @@ from config import Settings, estimate_cost_usd
 from core.event_bus import EventBus
 from core.llm_retry import call_gemini_with_retry
 from core.queue import SuspectQueue
+from detector.accessibility import audit_wcag_accessibility
 from detector.objective import DetectedSuspect, evaluate_objective_signals, probe_page_health
 from detector.visual_judge import VisualJudge
 from storage.artifacts import ArtifactStore
@@ -27,14 +28,16 @@ from workers.som_grounding import capture_som_perception
 
 class ActionDecision(BaseModel):
     thought: str = Field(description="Concise 1-sentence reason for the next action.")
-    action: Literal["click", "dblclick", "type", "select", "scroll", "navigate", "back", "wait"]
+    action: Literal[
+        "click", "dblclick", "type", "select", "scroll", "navigate", "back", "wait", "press_key"
+    ]
     element_id: int | None = Field(
         default=None,
         description="Numeric [id] from the Set-of-Marks screenshot for click, dblclick, type, or select.",
     )
     value: str | None = Field(
         default=None,
-        description="Input text for type, option value for select, full URL for navigate, or 'up'/'down' for scroll.",
+        description="Text to type, option value to select, URL to navigate, 'up'/'down' for scroll, or key name for press_key.",
     )
     suspected_visual_anomaly: bool = Field(
         default=False,
@@ -141,11 +144,45 @@ class GeminiActionPlanner:
 
 
 class HeuristicDryRunPlanner:
-    """Deterministic offline planner used ONLY when --mock-llm is explicitly requested."""
+    """Deterministic offline exploratory planner used ONLY when --mock-llm is explicitly requested."""
 
     def __init__(self) -> None:
         self._seen_controls: set[str] = set()
-        self._route_seeded: bool = False
+        self._seen_inputs: dict[str, int] = {}
+        self._visited_paths: set[str] = set()
+        self._known_routes: set[str] = set()
+        self._steps_on_current_path: int = 0
+        self._last_path: str = ""
+        self._pending_submit_after_input: bool = False
+
+    def _next_fuzz_value(self, el: dict[str, Any], attempt_idx: int) -> str:
+        el_type = (el.get("type") or "").lower()
+        tag = el.get("tag", "")
+        hint = " ".join(
+            str(x or "")
+            for x in (
+                el.get("placeholder"),
+                el["locator"].get("element_id"),
+                el["locator"].get("name"),
+                el.get("text"),
+            )
+        ).lower()
+
+        if el_type == "number" or "qty" in hint:
+            return ["0", "-5", "2"][attempt_idx % 3]
+        if tag == "textarea" or "bio" in hint or "message" in hint:
+            return "A" * 240
+        if "email" in hint or el_type == "email":
+            return "   "
+        if "coupon" in hint or "promo" in hint:
+            return "SAVE50"
+        if "zip" in hint:
+            return ["abc", "94107"][attempt_idx % 2]
+        if "exp" in hint:
+            return ["01/19", "12/28"][attempt_idx % 2]
+        if "name" in hint or "address" in hint:
+            return "Alex QA Tester"
+        return '<img src=x onerror="window.__qa_xss=true">'
 
     async def decide(
         self,
@@ -158,78 +195,185 @@ class HeuristicDryRunPlanner:
         step_index: int,
         max_steps: int,
     ) -> ActionDecision:
+        from urllib.parse import urlparse
+
         elements = dom_state.get("elements", [])
         url = dom_state.get("url", "")
+        cur_path = urlparse(url).path or "/"
+        self._visited_paths.add(cur_path)
+        for el in elements:
+            h = el.get("href") or ""
+            if h.startswith("/"):
+                self._known_routes.add(h.split("?")[0])
 
-        # Diversify initial route exploration by persona in offline dry runs
-        if not self._route_seeded:
-            self._route_seeded = True
-            preferred = {
-                "impatient_user": "/cart",
-                "hostile_fuzzer": "/catalog",
-                "confused_first_timer": "/orders",
-                "mobile_viewport_user": "/cart",
-                "edge_explorer": "/profile",
-            }.get(persona.name)
-            if preferred:
+        if cur_path != self._last_path:
+            self._last_path = cur_path
+            self._steps_on_current_path = 0
+            self._pending_submit_after_input = False
+        self._steps_on_current_path += 1
+
+        # Accessibility personas exercise keyboard Tab navigation + page sweeps
+        if persona.name.startswith("accessibility_"):
+            if self._steps_on_current_path == 1:
+                return ActionDecision(
+                    thought="Testing keyboard Tab focus traversal on current page",
+                    action="press_key",
+                    value="Tab",
+                )
+            for el in elements:
+                href = el.get("href") or ""
+                if el["tag"] == "a" and href.startswith("/") and href not in self._visited_paths:
+                    return ActionDecision(
+                        thought=f"Sweeping route {href} for WCAG audit",
+                        action="click",
+                        element_id=el["id"],
+                    )
+
+        # Persona-ordered initial route dispersion so parallel workers avoid duplicating step 1
+        if step_index == 1 and cur_path == "/":
+            preferred_order = {
+                "impatient_user": ["/cart", "/catalog"],
+                "hostile_fuzzer": ["/catalog", "/profile", "/support"],
+                "confused_first_timer": ["/orders", "/catalog"],
+                "mobile_viewport_user": ["/cart", "/catalog"],
+                "edge_explorer": ["/profile", "/support", "/orders"],
+            }.get(persona.name, ["/catalog"])
+            for target_route in preferred_order:
                 for el in elements:
-                    if el.get("href") == preferred:
-                        self._seen_controls.add(f"{url}:{el['locator']['primary_selector']}")
+                    if el.get("href") == target_route:
+                        self._seen_controls.add(f"{cur_path}:{el['locator']['primary_selector']}")
                         return ActionDecision(
-                            thought=f"Navigating directly to {preferred} for persona coverage",
+                            thought=f"Dispersing persona to {target_route}",
                             action="click",
                             element_id=el["id"],
                         )
 
+        # After typing into a form field, immediately click a non-nav action button on the page
+        if self._pending_submit_after_input:
+            self._pending_submit_after_input = False
+            for el in elements:
+                if el["tag"] == "button":
+                    key = f"{cur_path}:{el['locator']['primary_selector']}"
+                    txt = (el.get("text") or "").lower()
+                    if key not in self._seen_controls or any(
+                        w in txt for w in ("search", "apply", "save", "subscribe", "submit", "continue", "place")
+                    ):
+                        self._seen_controls.add(key)
+                        act: Literal["click", "dblclick"] = (
+                            "dblclick"
+                            if persona.name == "impatient_user" and "place order" in txt
+                            else "click"
+                        )
+                        return ActionDecision(
+                            thought=f"Submitting/activating '{el['text']}' after input",
+                            action=act,
+                            element_id=el["id"],
+                        )
+
+        # Impatient user completes checkout Step 1 -> Step 2 -> double-clicks Place Order
+        if persona.name == "impatient_user":
+            if cur_path == "/checkout" and "step=2" not in url:
+                for el in elements:
+                    if el["tag"] == "input":
+                        key = f"{cur_path}:{el['locator']['primary_selector']}"
+                        if key not in self._seen_inputs:
+                            self._seen_inputs[key] = 1
+                            hint = (el["locator"].get("element_id") or "").lower()
+                            val = "94107" if "zip" in hint else ("12/28" if "exp" in hint else "Alex Rivera")
+                            self._pending_submit_after_input = True
+                            return ActionDecision(
+                                thought=f"Filling checkout field {hint}",
+                                action="type",
+                                element_id=el["id"],
+                                value=val,
+                            )
+            for el in elements:
+                if el["tag"] == "button" and "place order" in (el.get("text") or "").lower():
+                    key = f"{url}:{el['locator']['primary_selector']}"
+                    if key not in self._seen_controls:
+                        self._seen_controls.add(key)
+                        return ActionDecision(
+                            thought="Impatiently double-clicking Place Order",
+                            action="dblclick",
+                            element_id=el["id"],
+                        )
+
+        # Hostile fuzzer tests inputs with edge/XSS/overflow payloads
         if persona.name == "hostile_fuzzer":
             for el in elements:
-                key = f"{url}:{el['locator']['primary_selector']}"
-                if el["tag"] in {"input", "textarea"} and key not in self._seen_controls:
-                    self._seen_controls.add(key)
-                    sel_id = el["locator"].get("element_id") or ""
-                    if "coupon" in sel_id:
-                        val = "SAVE50"
-                    elif "qty" in sel_id:
-                        val = "0"
-                    elif "bio" in sel_id:
-                        val = "A" * 240
-                    else:
-                        val = '<img src=x onerror="window.__qa_xss=true">'
-                    return ActionDecision(
-                        thought=f"Fuzzing {sel_id or el['tag']} input",
-                        action="type",
-                        element_id=el["id"],
-                        value=val,
-                    )
+                if el["tag"] in {"input", "textarea"}:
+                    key = f"{cur_path}:{el['locator']['primary_selector']}"
+                    attempt = self._seen_inputs.get(key, 0)
+                    max_attempts = 2 if (el.get("type") == "number" or "qty" in key) else 1
+                    if attempt < max_attempts:
+                        self._seen_inputs[key] = attempt + 1
+                        val = self._next_fuzz_value(el, attempt)
+                        self._pending_submit_after_input = True
+                        return ActionDecision(
+                            thought=f"Fuzzing input ({key}) attempt #{attempt + 1}",
+                            action="type",
+                            element_id=el["id"],
+                            value=val,
+                        )
 
+        # Exercise dropdown <select> options (confused_first_timer / edge_explorer)
         for el in elements:
-            if el["tag"] == "select":
-                key = f"{url}:{el['locator']['primary_selector']}"
-                if key not in self._seen_controls and el.get("options"):
+            if el["tag"] == "select" and el.get("options"):
+                key = f"{cur_path}:{el['locator']['primary_selector']}"
+                if key not in self._seen_controls:
                     self._seen_controls.add(key)
                     return ActionDecision(
-                        thought="Testing dropdown selection",
+                        thought="Testing select dropdown edge option",
                         action="select",
                         element_id=el["id"],
                         value=el["options"][-1]["value"],
                     )
 
+        # Click untested local page buttons (before navigating away)
         for el in elements:
-            key = f"{url}:{el['locator']['primary_selector']}"
-            if el["tag"] in {"button", "a"} and key not in self._seen_controls:
-                self._seen_controls.add(key)
-                act: Literal["click", "dblclick"] = (
-                    "dblclick"
-                    if persona.name == "impatient_user" and el["tag"] == "button"
-                    else "click"
-                )
-                return ActionDecision(
-                    thought=f"Exploring '{el['text'] or el['tag']}'",
-                    action=act,
-                    element_id=el["id"],
-                )
+            if el["tag"] == "button":
+                key = f"{cur_path}:{el['locator']['primary_selector']}"
+                if key not in self._seen_controls:
+                    self._seen_controls.add(key)
+                    act = (
+                        "dblclick"
+                        if persona.name == "impatient_user"
+                        else "click"
+                    )
+                    return ActionDecision(
+                        thought=f"Testing button '{el['text'] or el['tag']}'",
+                        action=act,
+                        element_id=el["id"],
+                    )
 
-        return ActionDecision(thought="Scrolling page to reveal more controls", action="scroll", value="down")
+        # Navigate to an unvisited internal route (including footer links like /legal/...)
+        for el in elements:
+            href = el.get("href") or ""
+            if el["tag"] == "a" and href.startswith("/") and href not in self._visited_paths:
+                key = f"{cur_path}:{el['locator']['primary_selector']}"
+                if key not in self._seen_controls:
+                    self._seen_controls.add(key)
+                    return ActionDecision(
+                        thought=f"Exploring unvisited route {href}",
+                        action="click",
+                        element_id=el["id"],
+                    )
+
+        # Test direct deep-step URL ONLY when the target app actually exposes a /checkout flow
+        if (
+            persona.name in {"confused_first_timer", "edge_explorer"}
+            and "/checkout" in self._known_routes
+            and "checkout_step2_probed" not in self._visited_paths
+        ):
+            self._visited_paths.add("checkout_step2_probed")
+            base = url.split(cur_path)[0] if cur_path != "/" else url.rstrip("/")
+            return ActionDecision(
+                thought="Testing direct deep-link navigation to discovered /checkout?step=2 flow",
+                action="navigate",
+                value=f"{base}/checkout?step=2",
+            )
+
+        return ActionDecision(thought="Scrolling to inspect remaining elements", action="scroll", value="down")
 
 
 @dataclass
@@ -511,6 +655,8 @@ async def run_single_worker(
                 locator_json=locator_json,
                 action_error=action_err,
             )
+            if persona.name.startswith("accessibility_"):
+                detected.extend(await audit_wcag_accessibility(page))
             if visual_judge is not None and (
                 decision.suspected_visual_anomaly or after_health.has_layout_anomaly
             ):

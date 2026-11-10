@@ -15,8 +15,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config import REPO_ROOT, get_settings
+from core.demo_replay import stream_recorded_run
 from core.event_bus import EventBus
 from core.orchestrator import DEFAULT_SWARM_PERSONAS, SwarmOrchestrator, SwarmRunRequest
+from reporter.report_writer import SEVERITY_RANK
 from storage.artifacts import ArtifactStore
 from storage.db import Database
 from workers.personas import PERSONAS
@@ -124,6 +126,8 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "gemini_configured": bool(settings.gemini_api_key and settings.gemini_api_key != "your_gemini_api_key_here"),
+        "github_configured": bool(settings.github_token),
+        "github_default_repo": settings.github_default_repo,
         "nav_model": settings.gemini_nav_model,
         "judge_model": settings.gemini_judge_model,
     }
@@ -204,7 +208,11 @@ async def get_run_detail(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Run not found")
     workers = await db.list_workers(run_id)
     suspects = [_enrich_suspect(s) for s in await db.list_suspects(run_id)]
-    bugs = await db.list_bug_reports(run_id)
+    bugs = sorted(
+        await db.list_bug_reports(run_id),
+        key=lambda b: SEVERITY_RANK.get(str(b.get("severity")), 0),
+        reverse=True,
+    )
     usage = await db.list_llm_usage(run_id)
 
     # Attach latest screenshot URL per worker for initial load / refresh recovery
@@ -261,13 +269,45 @@ async def get_benchmarks() -> dict[str, Any]:
     return {"available": False}
 
 
+@app.post("/api/runs/{run_id}/stop")
+async def stop_run(run_id: str) -> dict[str, Any]:
+    task = ACTIVE_TASKS.pop(run_id, None)
+    if task is not None:
+        task.cancel()
+    await db.update_run_status(run_id, "stopped", finished=True)
+    await event_bus.publish(run_id, "run_completed", {"run_id": run_id, "status": "stopped"})
+    return {"run_id": run_id, "status": "stopped"}
+
+
 @app.post("/api/demo/replay")
 async def launch_demo_replay() -> dict[str, Any]:
-    """Replay the most recent completed swarm run events (or a seeded local demo) cleanly over WebSocket."""
-    runs = await db.list_runs(limit=15)
-    source_run = next((r for r in runs if r["status"] == "completed" and r["mode"] == "swarm"), None)
+    """Replay the richest completed swarm run step-by-step over WebSocket (or start a fresh mock run)."""
+    runs = await db.list_runs(limit=25)
+    source_run = next(
+        (r for r in runs if r["status"] == "completed" and r["mode"] == "swarm" and not r["id"].startswith("demo_")),
+        None,
+    )
     if source_run is not None:
-        return {"run_id": source_run["id"], "replayed_existing": True}
+        demo_run_id = await db.create_run(
+            target_url=source_run["target_url"],
+            mode="swarm",
+            config={"replayed_from": source_run["id"]},
+            run_id=f"demo_{source_run['id'][-8:]}_{len(runs)}",
+        )
+
+        async def _replay_runner() -> None:
+            try:
+                await stream_recorded_run(
+                    source_run_id=source_run["id"],
+                    target_run_id=demo_run_id,
+                    db=db,
+                    event_bus=event_bus,
+                )
+            finally:
+                ACTIVE_TASKS.pop(demo_run_id, None)
+
+        ACTIVE_TASKS[demo_run_id] = asyncio.create_task(_replay_runner())
+        return {"run_id": demo_run_id, "replayed_existing": True}
 
     # Fall back to launching a quick local mock swarm run against NovaCart if reachable
     req = SwarmRunRequest(

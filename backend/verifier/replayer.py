@@ -9,6 +9,7 @@ from typing import Any
 from playwright.async_api import Browser
 
 from core.event_bus import EventBus
+from detector.accessibility import audit_wcag_accessibility
 from detector.objective import evaluate_objective_signals, probe_page_health
 from detector.signatures import normalize_url_path
 from detector.visual_judge import VisualJudge
@@ -164,6 +165,8 @@ class ReplayVerifier:
                         locator_json=locator,
                         action_error=action_err,
                     )
+                    if expected_cat == "accessibility":
+                        signals.extend(await audit_wcag_accessibility(page))
                     for sig_item in signals:
                         if _signature_matches(expected_sig, sig_item.error_signature, expected_cat, sig_item.category):
                             reproduced = True

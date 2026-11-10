@@ -104,10 +104,15 @@ async def _run_swarm_async(args: argparse.Namespace) -> int:
             artifacts=artifacts,
             event_bus=event_bus,
         )
+        personas = (
+            [p.strip() for p in args.personas.split(",") if p.strip()]
+            if getattr(args, "personas", "")
+            else list(DEFAULT_SWARM_PERSONAS)
+        )
         req = SwarmRunRequest(
             target_url=args.url,
             mode=args.mode,
-            personas=list(DEFAULT_SWARM_PERSONAS),
+            personas=personas,
             steps_per_worker=args.steps,
             max_wall_seconds=args.wall_seconds,
             github_repo=args.github_repo or "",
@@ -148,6 +153,7 @@ def main() -> int:
     swarm = sub.add_parser("run-swarm", help="Run full QA Swarm pipeline (Workers -> Verifier -> Reporter)")
     swarm.add_argument("--url", required=True, help="Target URL")
     swarm.add_argument("--mode", choices=["swarm", "single"], default="swarm")
+    swarm.add_argument("--personas", default="", help="Comma-separated persona names")
     swarm.add_argument("--steps", type=int, default=10, help="Steps per worker")
     swarm.add_argument("--wall-seconds", type=int, default=240, help="Hard wall-clock cap")
     swarm.add_argument("--github-repo", default="", help="Optional owner/repo for issue filing")

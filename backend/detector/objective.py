@@ -211,9 +211,16 @@ def evaluate_objective_signals(
 
     # Dead-end detection: interactive click/submit produced zero DOM, URL, or network response
     target_role = str(locator_json.get("role") or "")
+    target_href = str(locator_json.get("href") or "")
+    is_self_nav = (
+        target_role == "link"
+        and target_href.startswith("/")
+        and normalize_url_path(url) == normalize_url_path(f"http://localhost{target_href}")
+    )
     if (
         action_type == "click"
         and target_role in {"button", "link"}
+        and not is_self_nav
         and not action_error
         and before.url == after.url
         and before.dom_hash == after.dom_hash

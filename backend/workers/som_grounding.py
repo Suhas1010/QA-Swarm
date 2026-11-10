@@ -113,6 +113,7 @@ DOM_EXTRACTION_JS = """
         aria_label: ariaLabel,
         role,
         role_name: text || ariaLabel || null,
+        href: tag === 'a' ? el.getAttribute('href') : null,
         bbox: {
           x: Math.round(rect.left),
           y: Math.round(rect.top),

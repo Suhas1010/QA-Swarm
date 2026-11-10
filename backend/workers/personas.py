@@ -65,13 +65,36 @@ PERSONAS: dict[str, PersonaSpec] = {
     ),
     "edge_explorer": PersonaSpec(
         name="edge_explorer",
-        goal="Systematically cover all routes and interactive controls not yet visited by other flows.",
+        goal="Systematically cover all routes, modals, checkout steps, and footer links.",
         viewport_width=1280,
         viewport_height=800,
         has_touch=False,
         system_prompt=(
             "You are a thorough exploratory QA engineer. Visit every route in the navbar and footer, "
-            "exercise filters, sorting, forms, modals, and secondary buttons systematically."
+            "exercise filters, sorting, quick-view modals, checkout steps (including invalid & back nav), "
+            "profile forms, and support tickets systematically."
+        ),
+    ),
+    "accessibility_keyboard": PersonaSpec(
+        name="accessibility_keyboard",
+        goal="Test keyboard-only navigation (Tab, Enter) and WCAG label/focus/accessible-name compliance.",
+        viewport_width=1280,
+        viewport_height=800,
+        has_touch=False,
+        system_prompt=(
+            "You are a keyboard-only accessibility auditor (P1). Navigate through pages using 'press_key' "
+            "(Tab, Enter) and clicks, checking forms, buttons, modals, and links for WCAG 2.1 AA compliance."
+        ),
+    ),
+    "accessibility_low_vision": PersonaSpec(
+        name="accessibility_low_vision",
+        goal="Inspect contrast, alt text, labels, and zoomed/compact readability for WCAG 2.1 compliance.",
+        viewport_width=1024,
+        viewport_height=768,
+        has_touch=False,
+        system_prompt=(
+            "You are a low-vision accessibility auditor (P1). Check every page for text contrast, missing "
+            "image alt text, missing form labels, and text clipping or overflow."
         ),
     ),
 }

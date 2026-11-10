@@ -24,7 +24,12 @@ def _default_severity(category: str) -> str:
         return "Critical"
     if category in {"api_failure", "js_error"}:
         return "High"
-    return "Medium"
+    if category in {"accessibility", "layout_break", "validation_hole"}:
+        return "Medium"
+    return "Low"
+
+
+SEVERITY_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
 
 
 def _format_repro_steps(trace_slice: list[dict[str, Any]], start_url: str) -> list[str]:
@@ -123,11 +128,14 @@ class ReportWriter:
             except Exception:
                 pass
 
+        evidence = json.loads(suspect.get("evidence_json") or "{}")
+        wcag = evidence.get("wcag_criterion")
+
         lines = [
             f"# {title}",
             "",
             f"- **Severity:** {severity}",
-            f"- **Category:** `{suspect['category']}`",
+            f"- **Category:** `{suspect['category']}`" + (f" (`{wcag}`)" if wcag else ""),
             f"- **Persona:** `{suspect['persona']}`",
             f"- **Replay Verification:** Verified (`{repro_count}/3` fresh browser attempts reproduced)",
             f"- **URL:** `{suspect['url']}`",
