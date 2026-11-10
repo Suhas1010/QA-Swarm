@@ -21,6 +21,7 @@ class StepEvents:
     network_failures: list[dict[str, Any]] = field(default_factory=list)
     xss_triggered: bool = False
     crashed: bool = False
+    popup_opened: bool = False
 
 
 class BrowserSession:
@@ -110,12 +111,16 @@ class BrowserSession:
         def on_crash(_: Page) -> None:
             self._events.crashed = True
 
+        def on_popup(_: Page) -> None:
+            self._events.popup_opened = True
+
         page.on("console", on_console)
         page.on("pageerror", on_pageerror)
         page.on("response", on_response)
         page.on("requestfailed", on_requestfailed)
         page.on("dialog", on_dialog)
         page.on("crash", on_crash)
+        page.on("popup", on_popup)
 
     def drain_events(self) -> StepEvents:
         current = self._events

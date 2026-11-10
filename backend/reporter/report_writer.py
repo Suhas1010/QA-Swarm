@@ -8,7 +8,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from config import Settings, estimate_cost_usd
-from core.llm_retry import call_gemini_with_retry
+from core.llm_retry import DEFAULT_STRONG_FALLBACKS, call_gemini_with_fallback
 from storage.db import Database
 
 
@@ -88,9 +88,9 @@ class ReportWriter:
                 f"Network logs: {json.dumps(network_logs[:5])}\n"
             )
             try:
-                async def _call():
+                async def _call(model_name: str):
                     return await self.client.aio.models.generate_content(
-                        model=self.settings.gemini_report_model,
+                        model=model_name,
                         contents=prompt,
                         config=types.GenerateContentConfig(
                             system_instruction=(
@@ -103,7 +103,12 @@ class ReportWriter:
                         ),
                     )
 
-                response = await call_gemini_with_retry(_call, label="report")
+                response, used_model = await call_gemini_with_fallback(
+                    self.settings.gemini_report_model,
+                    DEFAULT_STRONG_FALLBACKS,
+                    _call,
+                    label="report",
+                )
                 usage = getattr(response, "usage_metadata", None)
                 if usage is not None:
                     p_tok = int(getattr(usage, "prompt_token_count", 0) or 0)
@@ -111,10 +116,10 @@ class ReportWriter:
                     await self.db.record_llm_usage(
                         run_id=run_id,
                         component="report",
-                        model=self.settings.gemini_report_model,
+                        model=used_model,
                         prompt_tokens=p_tok,
                         output_tokens=o_tok,
-                        cost_usd=estimate_cost_usd(self.settings.gemini_report_model, p_tok, o_tok),
+                        cost_usd=estimate_cost_usd(used_model, p_tok, o_tok),
                     )
                 parsed = (
                     response.parsed

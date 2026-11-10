@@ -291,6 +291,8 @@ class SwarmOrchestrator:
                     ]
 
                     # Each worker creates its own planner instance when mock so per-worker exploration state stays isolated
+                    run_seen_sigs: set[str] = set()
+                    run_sig_lock = asyncio.Lock()
                     worker_coros = []
                     for persona_name, step_cap in worker_specs:
                         w_planner: ActionPlanner = (
@@ -311,6 +313,8 @@ class SwarmOrchestrator:
                                 event_bus=self.event_bus,
                                 storage_state=storage_state,
                                 stop_event=stop_event,
+                                shared_seen_sigs=run_seen_sigs,
+                                shared_sig_lock=run_sig_lock,
                             )
                         )
 

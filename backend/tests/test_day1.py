@@ -13,7 +13,7 @@ import pytest
 from playwright.async_api import async_playwright
 
 from config import Settings
-from core.llm_retry import call_gemini_with_retry, parse_retry_delay_seconds
+from core.llm_retry import call_gemini_with_fallback, call_gemini_with_retry, parse_retry_delay_seconds
 from storage.artifacts import ArtifactStore
 from storage.db import Database
 from workers.agent_loop import ActionDecision, GeminiActionPlanner, HeuristicDryRunPlanner, run_single_worker
@@ -127,6 +127,31 @@ def test_gemini_rate_limit_retry_helper() -> None:
 
     assert asyncio.run(_run()) == "ok"
     assert attempts["n"] == 2
+
+
+def test_gemini_fallback_skips_404_and_daily_exhausted() -> None:
+    seen: list[str] = []
+
+    async def _run() -> tuple[str, str]:
+        async def _call(model_name: str) -> str:
+            seen.append(model_name)
+            if model_name == "gemini-2.5-pro":
+                raise RuntimeError("404 NOT_FOUND: model no longer available")
+            if model_name == "gemini-2.5-flash":
+                raise RuntimeError("429 RESOURCE_EXHAUSTED GenerateRequestsPerDay retry in 65000s")
+            return f"ok:{model_name}"
+
+        return await call_gemini_with_fallback(
+            "gemini-2.5-pro",
+            ["gemini-2.5-flash", "gemini-3.5-flash-lite"],
+            _call,
+            label="test-fb",
+        )
+
+    res, used = asyncio.run(_run())
+    assert res == "ok:gemini-3.5-flash-lite"
+    assert used == "gemini-3.5-flash-lite"
+    assert seen == ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
 
 
 def test_novacart_and_playwright_worker_e2e(tmp_path: Path) -> None:

@@ -14,7 +14,10 @@ from pydantic import BaseModel, Field
 
 from config import Settings, estimate_cost_usd
 from core.event_bus import EventBus
-from core.llm_retry import call_gemini_with_retry
+from core.llm_retry import (
+    DEFAULT_NAV_FALLBACKS,
+    call_gemini_with_fallback,
+)
 from core.queue import SuspectQueue
 from detector.accessibility import audit_wcag_accessibility
 from detector.objective import DetectedSuspect, evaluate_objective_signals, probe_page_health
@@ -60,7 +63,7 @@ class ActionPlanner(Protocol):
 
 
 class GeminiActionPlanner:
-    """Vision-driven navigation planner powered by Gemini Flash."""
+    """Vision-driven navigation planner powered by Gemini Flash with automatic model & heuristic fallback."""
 
     def __init__(self, settings: Settings, db: Database) -> None:
         if not settings.gemini_api_key:
@@ -68,6 +71,12 @@ class GeminiActionPlanner:
         self.settings = settings
         self.db = db
         self.client = genai.Client(api_key=settings.gemini_api_key)
+        self._persona_fallbacks: dict[str, HeuristicDryRunPlanner] = {}
+
+    def _get_fallback(self, persona_name: str) -> HeuristicDryRunPlanner:
+        if persona_name not in self._persona_fallbacks:
+            self._persona_fallbacks[persona_name] = HeuristicDryRunPlanner()
+        return self._persona_fallbacks[persona_name]
 
     async def decide(
         self,
@@ -103,9 +112,9 @@ class GeminiActionPlanner:
             f"Interactive elements:\n{json.dumps(compact_elements, ensure_ascii=False)}"
         )
 
-        async def _call():
+        async def _call_for_model(model_name: str):
             return await self.client.aio.models.generate_content(
-                model=self.settings.gemini_nav_model,
+                model=model_name,
                 contents=[
                     types.Part.from_bytes(data=som_jpeg, mime_type="image/jpeg"),
                     prompt,
@@ -122,17 +131,36 @@ class GeminiActionPlanner:
                 ),
             )
 
-        response = await call_gemini_with_retry(_call, label=f"nav:{persona.name}")
+        try:
+            response, used_model = await call_gemini_with_fallback(
+                self.settings.gemini_nav_model,
+                DEFAULT_NAV_FALLBACKS,
+                _call_for_model,
+                label=f"nav:{persona.name}",
+            )
+        except Exception as exc:
+            # Graceful fallback when API quota is exhausted across all models so real sites keep running
+            fb_decision = await self._get_fallback(persona.name).decide(
+                run_id=run_id,
+                persona=persona,
+                som_jpeg=som_jpeg,
+                dom_state=dom_state,
+                history=history,
+                step_index=step_index,
+                max_steps=max_steps,
+            )
+            fb_decision.thought = f"[Gemini quota fallback: {str(exc)[:45]}] {fb_decision.thought}"
+            return fb_decision
 
         usage = getattr(response, "usage_metadata", None)
         if usage is not None:
             p_tok = int(getattr(usage, "prompt_token_count", 0) or 0)
             o_tok = int(getattr(usage, "candidates_token_count", 0) or 0)
-            cost = estimate_cost_usd(self.settings.gemini_nav_model, p_tok, o_tok)
+            cost = estimate_cost_usd(used_model, p_tok, o_tok)
             await self.db.record_llm_usage(
                 run_id=run_id,
                 component="nav",
-                model=self.settings.gemini_nav_model,
+                model=used_model,
                 prompt_tokens=p_tok,
                 output_tokens=o_tok,
                 cost_usd=cost,
@@ -410,12 +438,20 @@ async def _record_detected_suspects(
     detected: list[DetectedSuspect],
     screenshot_rel: str,
     seen_signatures: set[str],
+    sig_lock: asyncio.Lock | None = None,
+    max_run_suspects: int = 30,
 ) -> int:
     count = 0
     for item in detected:
-        if item.error_signature in seen_signatures:
-            continue
-        seen_signatures.add(item.error_signature)
+        if sig_lock is not None:
+            async with sig_lock:
+                if len(seen_signatures) >= max_run_suspects or item.error_signature in seen_signatures:
+                    continue
+                seen_signatures.add(item.error_signature)
+        else:
+            if len(seen_signatures) >= max_run_suspects or item.error_signature in seen_signatures:
+                continue
+            seen_signatures.add(item.error_signature)
         evidence = {**item.evidence, "screenshot_path": screenshot_rel}
         suspect_id = await db.create_suspect(
             run_id=run_id,
@@ -466,6 +502,8 @@ async def run_single_worker(
     event_bus: EventBus | None = None,
     storage_state: dict[str, Any] | None = None,
     stop_event: asyncio.Event | None = None,
+    shared_seen_sigs: set[str] | None = None,
+    shared_sig_lock: asyncio.Lock | None = None,
 ) -> WorkerResult:
     """Run one persona worker from target_url through max_steps with detection and trace persistence."""
     viewport_label = f"{persona.viewport_width}x{persona.viewport_height}"
@@ -487,11 +525,15 @@ async def run_single_worker(
     history: list[str] = []
     executed_trace: list[dict[str, Any]] = []
     step_records: list[WorkerStepRecord] = []
-    seen_worker_sigs: set[str] = set()
+    seen_worker_sigs: set[str] = shared_seen_sigs if shared_seen_sigs is not None else set()
 
     try:
         page = await session.start()
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+        try:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+        except Exception as nav_exc:
+            if page.url == "about:blank":
+                raise RuntimeError(f"Failed to load {target_url}: {nav_exc}") from nav_exc
         await session.settle()
 
         # Check initial load signals (e.g., mobile layout overflow or cold-load noise)
@@ -541,6 +583,7 @@ async def run_single_worker(
             detected=init_suspects,
             screenshot_rel=init_clean_rel,
             seen_signatures=seen_worker_sigs,
+            sig_lock=shared_sig_lock,
         )
 
         prev_health = init_health
@@ -682,6 +725,7 @@ async def run_single_worker(
                 detected=detected,
                 screenshot_rel=clean_rel,
                 seen_signatures=seen_worker_sigs,
+                sig_lock=shared_sig_lock,
             )
 
             prev_health = after_health

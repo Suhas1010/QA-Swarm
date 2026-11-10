@@ -19,7 +19,14 @@ HEALTH_PROBE_JS = """
   const docOverflow = document.documentElement.scrollWidth > vw + 2;
 
   const brokenImages = Array.from(document.querySelectorAll('img'))
-    .filter(img => img.complete && img.naturalWidth === 0 && !img.getAttribute('onerror'))
+    .filter(img => {
+      if (!img.complete || img.naturalWidth !== 0 || img.getAttribute('onerror')) return false;
+      const src = img.getAttribute('src') || '';
+      if (!src || src.startsWith('data:')) return false;
+      if (img.getAttribute('loading') === 'lazy') return false;
+      const r = img.getBoundingClientRect();
+      return r.width > 16 && r.height > 16 && r.top < vh && r.bottom > 0;
+    })
     .map(img => img.getAttribute('src') || 'img');
 
   const textOverflows = [];
@@ -132,6 +139,70 @@ async def probe_page_health(page: Page) -> PageHealthSnapshot:
     )
 
 
+_NOISY_THIRD_PARTY_HOSTS = (
+    "doubleclick.net",
+    "googlesyndication.com",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "adtrafficquality.google",
+    "sodar",
+    "facebook.net",
+    "connect.facebook.net",
+    "scorecardresearch.com",
+    "adservice.google.",
+    "taboola.com",
+    "outbrain.com",
+    "criteo.",
+    "pubmatic.",
+    "adnxs.",
+    "amazon-adsystem.",
+    "hotjar.com",
+    "clarity.ms",
+    "newrelic.",
+    "nr-data.net",
+    "sentry.io",
+)
+
+_NOISY_CONSOLE_SUBSTRINGS = (
+    "failed to load resource:",
+    "permissions policy violation",
+    "third-party cookie",
+    "resizeobserver loop",
+    "deprecated",
+    "favicon.ico",
+)
+
+_NOISY_AUTH_PATHS = ("/sso/", "/auth/session", "/auth/check", "/api/me", "/session/check")
+_INTERNAL_FRAMEWORK_PATHS = ("/__data.json", "/_next/data/")
+
+
+def _is_noisy_third_party(req_url: str, page_url: str) -> bool:
+    low = req_url.lower()
+    return any(host in low for host in _NOISY_THIRD_PARTY_HOSTS)
+
+
+def _is_noisy_console_error(text: str, page_url: str) -> bool:
+    low = text.lower()
+    if any(sub in low for sub in _NOISY_CONSOLE_SUBSTRINGS):
+        return True
+    if any(host in low for host in _NOISY_THIRD_PARTY_HOSTS):
+        return True
+    # Filter third-party CORS preflight console noise unrelated to the page's own origin
+    if "blocked by cors policy" in low or "access to xmlhttprequest at" in low or "access to fetch at" in low:
+        from urllib.parse import urlparse
+        page_host = urlparse(page_url).netloc.lower().lstrip("www.")
+        if page_host and f"://{page_host}" not in low and f".{page_host}" not in low:
+            return True
+        if "/services/mobile/" in low:
+            return True
+    return False
+
+
+def _is_noisy_page_error(err: str) -> bool:
+    low = err.lower()
+    return "resizeobserver loop" in low or low.strip() == "library not found"
+
+
 def evaluate_objective_signals(
     *,
     before: PageHealthSnapshot,
@@ -158,6 +229,8 @@ def evaluate_objective_signals(
         )
 
     for err in events.page_errors:
+        if _is_noisy_page_error(err):
+            continue
         suspects.append(
             DetectedSuspect(
                 category="js_error",
@@ -171,6 +244,8 @@ def evaluate_objective_signals(
 
     for c_err in events.console_errors:
         text = str(c_err.get("text") or "")
+        if _is_noisy_console_error(text, url):
+            continue
         suspects.append(
             DetectedSuspect(
                 category="js_error",
@@ -186,6 +261,16 @@ def evaluate_objective_signals(
         status = int(net.get("status") or 0)
         method = str(net.get("method") or "GET")
         req_url = str(net.get("url") or url)
+        if _is_noisy_third_party(req_url, url):
+            continue
+        if status == 0 and "ERR_" in str(net.get("failure") or ""):
+            from urllib.parse import urlparse
+            if urlparse(req_url).netloc and urlparse(req_url).netloc != urlparse(url).netloc:
+                continue
+        if status in {401, 403} and any(p in req_url.lower() for p in _NOISY_AUTH_PATHS):
+            continue
+        if status == 404 and any(p in req_url.lower() for p in _INTERNAL_FRAMEWORK_PATHS):
+            continue
         category = "dead_link" if (status == 404 and "/api/" not in req_url) else "api_failure"
         suspects.append(
             DetectedSuspect(
@@ -209,7 +294,7 @@ def evaluate_objective_signals(
             )
         )
 
-    # Dead-end detection: interactive click/submit produced zero DOM, URL, or network response
+    # Dead-end detection: interactive click/submit produced zero DOM, URL, popup, or network response
     target_role = str(locator_json.get("role") or "")
     target_href = str(locator_json.get("href") or "")
     is_self_nav = (
@@ -217,10 +302,14 @@ def evaluate_objective_signals(
         and target_href.startswith("/")
         and normalize_url_path(url) == normalize_url_path(f"http://localhost{target_href}")
     )
+    skip_href = target_href.startswith(("mailto:", "tel:")) or bool(locator_json.get("target_blank"))
     if (
         action_type == "click"
         and target_role in {"button", "link"}
         and not is_self_nav
+        and not skip_href
+        and not locator_json.get("is_disabled")
+        and not events.popup_opened
         and not action_error
         and before.url == after.url
         and before.dom_hash == after.dom_hash

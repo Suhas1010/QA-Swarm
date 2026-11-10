@@ -76,9 +76,10 @@ export default function App() {
   const [bugReports, setBugReports] = useState<BugReportItem[]>([]);
   const [summary, setSummary] = useState<RunSummary | null>(null);
 
-  // Bug detail modal & severity filter
+  // Bug detail modal & filters
   const [bugDetail, setBugDetail] = useState<BugDetailResponse | null>(null);
   const [sevFilter, setSevFilter] = useState<string>("All");
+  const [feedFilter, setFeedFilter] = useState<string>("All");
   const wsRef = useRef<WebSocket | null>(null);
 
   async function refreshMetadata() {
@@ -233,7 +234,7 @@ export default function App() {
   }
 
   return (
-    <div>
+    <div className="app-root">
       <header className="topbar">
         <div className="brand-wrap">
           <Bug size={24} color="#38bdf8" />
@@ -283,7 +284,7 @@ export default function App() {
 
       <main className="shell">
         {/* Run Launcher */}
-        <section className="panel" style={{ marginBottom: "1rem" }}>
+        <section className="panel launcher-panel">
           <form onSubmit={handleLaunch}>
             <div className="launcher-grid">
               <div className="field">
@@ -516,10 +517,12 @@ export default function App() {
         {tab === "live" ? (
           <div className="workspace-split">
             {/* 5-Browser Live Grid */}
-            <section>
-              <h2 style={{ margin: "0 0 0.7rem", fontSize: "1rem", color: "#cbd5e1" }}>
-                Live Swarm Browsers ({workers.length})
-              </h2>
+            <section className="browsers-pane">
+              <div className="section-head">
+                <h2 className="section-title">
+                  Live Swarm Browsers ({workers.length})
+                </h2>
+              </div>
               {workers.length === 0 ? (
                 <div className="panel" style={{ color: "#94a3b8" }}>
                   Click <strong>Launch Swarm</strong> above to start 5 parallel Playwright persona workers.
@@ -563,17 +566,34 @@ export default function App() {
             </section>
 
             {/* Live Bug Feed */}
-            <section className="panel">
-              <h2 style={{ margin: "0 0 0.75rem", fontSize: "1rem", color: "#cbd5e1" }}>
-                Live Verification Feed ({suspects.length})
-              </h2>
+            <section className="panel feed-pane">
+              <div className="section-head" style={{ flexWrap: "wrap" }}>
+                <h2 className="section-title">
+                  Verification Feed ({suspects.length})
+                </h2>
+                <div style={{ display: "flex", gap: "0.3rem" }}>
+                  {["All", "Verified", "Verifying", "Rejected"].map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      className={`tab-btn ${feedFilter === st ? "active" : ""}`}
+                      style={{ padding: "0.18rem 0.5rem", fontSize: "0.72rem" }}
+                      onClick={() => setFeedFilter(st)}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {suspects.length === 0 ? (
-                <p style={{ color: "#94a3b8", fontSize: "0.9rem" }}>
+                <p style={{ color: "#94a3b8", fontSize: "0.84rem" }}>
                   No suspected bugs detected yet. Workers are exploring...
                 </p>
               ) : (
                 <div className="feed-list">
-                  {suspects.map((s) => {
+                  {suspects
+                    .filter((s) => feedFilter === "All" || s.status === feedFilter)
+                    .map((s) => {
                     const report = reportBySuspect.get(s.id);
                     return (
                       <div
@@ -641,7 +661,7 @@ export default function App() {
           </div>
         ) : (
           /* Summary & Benchmark Tab */
-          <section style={{ display: "grid", gap: "1rem" }}>
+          <section className="summary-pane">
             <div className="panel">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
                 <h2 style={{ margin: 0 }}>Filed Verified Bug Reports ({bugReports.length})</h2>

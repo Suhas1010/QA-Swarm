@@ -18,6 +18,10 @@ def _parse_bool(value: str | None, default: bool) -> bool:
 
 # Approximate per-1M token rates (USD) for transparent cost telemetry.
 MODEL_PRICING_PER_1M: dict[str, tuple[float, float]] = {
+    "gemini-3.5-flash-lite": (0.10, 0.40),
+    "gemini-3.5-flash": (0.30, 2.50),
+    "gemini-3.6-flash": (0.30, 2.50),
+    "gemini-3.8-flash": (0.30, 2.50),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.0-flash": (0.10, 0.40),
@@ -64,9 +68,9 @@ def get_settings() -> Settings:
 
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-        gemini_nav_model=os.getenv("GEMINI_NAV_MODEL", "gemini-2.5-flash").strip(),
-        gemini_judge_model=os.getenv("GEMINI_JUDGE_MODEL", "gemini-2.5-pro").strip(),
-        gemini_report_model=os.getenv("GEMINI_REPORT_MODEL", "gemini-2.5-pro").strip(),
+        gemini_nav_model=os.getenv("GEMINI_NAV_MODEL", "gemini-3.5-flash-lite").strip(),
+        gemini_judge_model=os.getenv("GEMINI_JUDGE_MODEL", "gemini-3.5-flash").strip(),
+        gemini_report_model=os.getenv("GEMINI_REPORT_MODEL", "gemini-3.5-flash").strip(),
         gemini_embed_model=os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001").strip(),
         github_token=os.getenv("GITHUB_TOKEN", "").strip(),
         github_default_repo=os.getenv("GITHUB_DEFAULT_REPO", "").strip(),

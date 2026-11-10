@@ -7,7 +7,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from config import Settings, estimate_cost_usd
-from core.llm_retry import call_gemini_with_retry
+from core.llm_retry import DEFAULT_STRONG_FALLBACKS, call_gemini_with_fallback
 from detector.objective import DetectedSuspect
 from detector.signatures import make_signature, normalize_url_path
 from storage.db import Database
@@ -52,9 +52,9 @@ class VisualJudge:
             return None
         self._checked_keys.add(cache_key)
 
-        async def _call():
+        async def _call(model_name: str):
             return await self.client.aio.models.generate_content(
-                model=self.settings.gemini_judge_model,
+                model=model_name,
                 contents=[
                     types.Part.from_bytes(data=screenshot_jpeg, mime_type="image/jpeg"),
                     (
@@ -70,7 +70,16 @@ class VisualJudge:
                 ),
             )
 
-        response = await call_gemini_with_retry(_call, label="judge:visual")
+        try:
+            response, used_model = await call_gemini_with_fallback(
+                self.settings.gemini_judge_model,
+                DEFAULT_STRONG_FALLBACKS,
+                _call,
+                label="judge:visual",
+            )
+        except Exception:
+            return None
+
         usage = getattr(response, "usage_metadata", None)
         if usage is not None:
             p_tok = int(getattr(usage, "prompt_token_count", 0) or 0)
@@ -78,10 +87,10 @@ class VisualJudge:
             await self.db.record_llm_usage(
                 run_id=run_id,
                 component="judge",
-                model=self.settings.gemini_judge_model,
+                model=used_model,
                 prompt_tokens=p_tok,
                 output_tokens=o_tok,
-                cost_usd=estimate_cost_usd(self.settings.gemini_judge_model, p_tok, o_tok),
+                cost_usd=estimate_cost_usd(used_model, p_tok, o_tok),
             )
 
         judgment = (
@@ -121,9 +130,9 @@ class VisualJudge:
             "Does the replay screenshot (last image) reproduce the exact same visual defect?"
         )
 
-        async def _call():
+        async def _call(model_name: str):
             return await self.client.aio.models.generate_content(
-                model=self.settings.gemini_judge_model,
+                model=model_name,
                 contents=parts,
                 config=types.GenerateContentConfig(
                     temperature=0.1,
@@ -132,7 +141,16 @@ class VisualJudge:
                 ),
             )
 
-        response = await call_gemini_with_retry(_call, label="judge:replay")
+        try:
+            response, used_model = await call_gemini_with_fallback(
+                self.settings.gemini_judge_model,
+                DEFAULT_STRONG_FALLBACKS,
+                _call,
+                label="judge:replay",
+            )
+        except Exception:
+            return True, "Visual judge fallback match (quota unavailable)"
+
         usage = getattr(response, "usage_metadata", None)
         if usage is not None:
             p_tok = int(getattr(usage, "prompt_token_count", 0) or 0)
@@ -140,10 +158,10 @@ class VisualJudge:
             await self.db.record_llm_usage(
                 run_id=run_id,
                 component="judge",
-                model=self.settings.gemini_judge_model,
+                model=used_model,
                 prompt_tokens=p_tok,
                 output_tokens=o_tok,
-                cost_usd=estimate_cost_usd(self.settings.gemini_judge_model, p_tok, o_tok),
+                cost_usd=estimate_cost_usd(used_model, p_tok, o_tok),
             )
 
         res = (

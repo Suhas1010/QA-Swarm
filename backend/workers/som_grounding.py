@@ -11,7 +11,8 @@ DOM_EXTRACTION_JS = """
 () => {
   const selectors = [
     'a[href]', 'button', 'input', 'select', 'textarea',
-    '[role="button"]', '[role="link"]', '[onclick]'
+    '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+    '[onclick]', 'summary'
   ].join(',');
 
   const nodes = Array.from(document.querySelectorAll(selectors));
@@ -65,7 +66,13 @@ DOM_EXTRACTION_JS = """
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
       continue;
     }
-    const rect = el.getBoundingClientRect();
+    let rect = el.getBoundingClientRect();
+    if ((rect.width < 6 || rect.height < 6) && el.firstElementChild) {
+      rect = el.firstElementChild.getBoundingClientRect();
+    }
+    if ((rect.width < 6 || rect.height < 6) && el.getClientRects().length > 0) {
+      rect = el.getClientRects()[0];
+    }
     if (rect.width < 6 || rect.height < 6) continue;
     if (rect.bottom < 0 || rect.top > vh || rect.right < 0 || rect.left > vw) continue;
 
@@ -114,6 +121,8 @@ DOM_EXTRACTION_JS = """
         role,
         role_name: text || ariaLabel || null,
         href: tag === 'a' ? el.getAttribute('href') : null,
+        target_blank: tag === 'a' ? el.getAttribute('target') === '_blank' : false,
+        is_disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
         bbox: {
           x: Math.round(rect.left),
           y: Math.round(rect.top),
